@@ -4,6 +4,7 @@ import gradio as gr
 import numpy as np
 import sounddevice as sd
 import threading
+from oscilloscope_utils import vector_path_to_audio, reorder_path, image_to_vectors
 
 # Global state
 audio_thread = None
@@ -12,17 +13,12 @@ is_playing = False
 # Constants
 SAMPLE_RATE = 44100
 
-# Shape/vector data (simple example)
-def generate_tone_from_vectors(vectors, duration=2):
-    t = np.linspace(0, duration, int(SAMPLE_RATE * duration), endpoint=False)
-    x = np.interp(t, np.linspace(0, duration, len(vectors)), [v[0] for v in vectors])
-    y = np.interp(t, np.linspace(0, duration, len(vectors)), [v[1] for v in vectors])
-    return np.stack([x, y], axis=-1)
+# Playback
 
 def play_audio(vectors):
     global is_playing
     is_playing = True
-    audio_data = generate_tone_from_vectors(vectors)
+    audio_data = vector_path_to_audio(reorder_path(vectors))
     sd.play(audio_data, samplerate=SAMPLE_RATE, blocking=True)
     is_playing = False
 
@@ -37,30 +33,40 @@ def stop_playback():
     is_playing = False
     sd.stop()
 
+# Drawing handler
 def draw_handler(img):
-    # Placeholder: Convert img to vector list
-    return [(0.1, 0.1), (0.2, 0.2), (0.3, 0.1), (0.1, 0.1)]
+    return image_to_vectors(img)
 
+# Demos
 def clock_demo():
-    # Placeholder clock shape
     return [(np.cos(a), np.sin(a)) for a in np.linspace(0, 2 * np.pi, 100)]
 
 def cube_demo():
-    # Placeholder 3D cube projected onto 2D
     return [(-1, -1), (-1, 1), (1, 1), (1, -1), (-1, -1)]
 
 def spaceship_demo():
-    # Placeholder spaceship
     return [(0, 0), (0.5, 1), (1, 0), (0.5, -0.5), (0, 0)]
 
+# Tone Generator
+def generate_tone(note, octave, duration):
+    notes = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+    sr = 48000
+    a4_freq, tones_from_a4 = 440, 12 * (octave - 4) + (note - 9)
+    frequency = a4_freq * 2 ** (tones_from_a4 / 12)
+    duration = int(duration)
+    audio = np.linspace(0, duration, duration * sr)
+    audio = (20000 * np.sin(audio * (2 * np.pi * frequency))).astype(np.int16)
+    return sr, audio
+
+# Interface
 with gr.Blocks() as demo:
     with gr.Tab("Draw"):
-        draw = gr.Sketchpad()
+        editor = gr.ImageEditor()
         start = gr.Button("Start (Spacebar)")
         stop = gr.Button("Stop")
-        
-        draw.change(fn=draw_handler, inputs=draw, outputs=None)
-        start.click(fn=start_playback, inputs=draw.change(draw_handler), outputs=None)
+
+        editor.change(fn=draw_handler, inputs=editor, outputs=None)
+        start.click(fn=start_playback, inputs=editor.change(draw_handler), outputs=None)
         stop.click(fn=stop_playback)
 
     with gr.Tab("Demos"):
@@ -71,5 +77,16 @@ with gr.Blocks() as demo:
         clock.click(lambda: start_playback(clock_demo()))
         cube.click(lambda: start_playback(cube_demo()))
         ship.click(lambda: start_playback(spaceship_demo()))
+
+    with gr.Tab("Tone Generator"):
+        gr.Interface(
+            fn=generate_tone,
+            inputs=[
+                gr.Dropdown(["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"], type="index"),
+                gr.Slider(4, 6, step=1),
+                gr.Textbox(value="1", label="Duration in seconds"),
+            ],
+            outputs="audio"
+        )
 
 demo.launch()
